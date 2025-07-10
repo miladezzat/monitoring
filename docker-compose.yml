@@ -1,0 +1,42 @@
+version: '3.7'
+
+services:
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+  loki:
+    image: grafana/loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/config.yaml:/etc/loki/config.yaml
+
+  promtail:
+    image: grafana/promtail
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/config.yaml
+      - /var/log/nestjs:/var/log/nestjs
+    command: -config.file=/etc/promtail/config.yaml
+
+  tempo:
+    image: grafana/tempo
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./tempo/tempo-config.yaml:/etc/tempo-config.yaml
+    command: ["--config.file=/etc/tempo-config.yaml"]
+
+volumes:
+  grafana-storage:
