@@ -1,0 +1,39 @@
+groups:
+  - name: monitoring
+    rules:
+      - alert: BackendDown
+        expr: up{job=~"prometheus|grafana|alloy|loki|tempo|alertmanager"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} is unavailable'
+          description: 'Prometheus cannot scrape {{ $labels.instance }}. Check service readiness and logs.'
+      - alert: ApplicationDown
+        expr: up{job="application"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Application {{ $labels.instance }} is unavailable'
+      - alert: HighErrorRate
+        expr: (sum by (service_name) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (service_name) (rate(http_requests_total[5m])) > 0.05) and on (service_name) (sum by (service_name) (rate(http_requests_total[5m])) > 0.5)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'High error rate for {{ $labels.service_name }}'
+      - alert: TelemetryQueueBacklog
+        expr: otelcol_exporter_queue_size{data_type=~"traces|logs"} / otelcol_exporter_queue_capacity{data_type=~"traces|logs"} > 0.8
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Alloy {{ $labels.data_type }} exporter queue is nearly full'
+      - alert: FileLogsDropped
+        expr: sum(rate(loki_write_dropped_entries_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Alloy is dropping file log entries'

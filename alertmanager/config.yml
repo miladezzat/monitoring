@@ -1,0 +1,9 @@
+route:
+  receiver: local
+  group_by: [alertname, job]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+receivers:
+  - name: local
+    # Alerts are visible in the UI. Configure a receiver before production use.

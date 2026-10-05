@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: monitoring
+    orgId: 1
+    folder: Monitoring
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/dashboards

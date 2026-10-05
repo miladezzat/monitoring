@@ -1,0 +1,100 @@
+logging {
+  level = "info"
+}
+
+// Any language can send OTLP traces and logs to these standard endpoints.
+otelcol.receiver.otlp "applications" {
+  grpc { endpoint = "0.0.0.0:4317" }
+  http { endpoint = "0.0.0.0:4318" }
+  output {
+    traces = [otelcol.processor.memory_limiter.applications.input]
+    logs   = [otelcol.processor.memory_limiter.applications.input]
+  }
+}
+
+otelcol.processor.memory_limiter "applications" {
+  check_interval = "1s"
+  limit = "192MiB"
+  spike_limit = "48MiB"
+  output {
+    traces = [otelcol.processor.batch.applications.input]
+    logs   = [otelcol.processor.batch.applications.input]
+  }
+}
+
+otelcol.processor.batch "applications" {
+  timeout = "1s"
+  send_batch_size = 256
+  send_batch_max_size = 512
+  output {
+    traces = [otelcol.exporter.otlphttp.tempo.input]
+    logs   = [otelcol.exporter.otlphttp.loki.input]
+  }
+}
+
+otelcol.storage.file "queues" {
+  directory = "/var/lib/alloy/queues"
+  fsync = true
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client { endpoint = "http://tempo:4318" }
+  sending_queue {
+    enabled = true
+    queue_size = 256
+    num_consumers = 2
+    storage = otelcol.storage.file.queues.handler
+  }
+  retry_on_failure {
+    initial_interval = "1s"
+    max_interval = "10s"
+    max_elapsed_time = "5m"
+  }
+}
+
+otelcol.exporter.otlphttp "loki" {
+  client { endpoint = "http://loki:3100/otlp" }
+  sending_queue {
+    enabled = true
+    queue_size = 256
+    num_consumers = 2
+    storage = otelcol.storage.file.queues.handler
+  }
+  retry_on_failure {
+    initial_interval = "1s"
+    max_interval = "10s"
+    max_elapsed_time = "5m"
+  }
+}
+
+// File collection is an alternative to OTLP logs; choose one per application.
+local.file_match "applications" {
+  path_targets = [
+    {"__path__" = "/var/log/apps/*.log", "environment" = "local"},
+  ]
+  sync_period = "5s"
+}
+
+loki.source.file "applications" {
+  targets = local.file_match.applications.targets
+  forward_to = [loki.process.applications.receiver]
+}
+
+loki.process "applications" {
+  stage.json { expressions = { service_name = "service_name" } }
+  stage.labels { values = { service_name = "" } }
+  // Trace IDs stay in the JSON body, not the index.
+  stage.label_drop { values = ["filename"] }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+    batch_wait = "1s"
+    batch_size = "256KiB"
+    min_backoff_period = "500ms"
+    max_backoff_period = "5s"
+    max_backoff_retries = 10
+  }
+}
