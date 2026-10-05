@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Round-trip all local volumes into a temporary project. Interrupts the source stack."""
 import secrets
+import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -36,6 +38,10 @@ def main():
         with tempfile.TemporaryDirectory(prefix="monitoring-backup-") as temporary:
             folder = Path(temporary) / "snapshot"
             subprocess.run([sys.executable, "scripts/backup.py", "backup", str(folder)], cwd=ROOT, env=dict(CONFIG), check=True)
+            for archive in folder.glob("*.tar.gz"):
+                metadata = archive.stat()
+                assert metadata.st_uid == os.getuid(), "Archive not owned by the invoking host user"
+                assert stat.S_IMODE(metadata.st_mode) == 0o600, "Archive permissions expose private telemetry"
             compose("stop")
             subprocess.run([sys.executable, "scripts/backup.py", "restore", str(folder)], cwd=ROOT, env=target_env, check=True)
             # A second restore must refuse to overwrite the existing target data.

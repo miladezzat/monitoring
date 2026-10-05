@@ -38,7 +38,9 @@ def main():
             compose("stop")
             for key, value in volumes.items():
                 filename = key + ".tar.gz"
-                script = f"import tarfile,os; t=tarfile.open('/backup/{filename}','w:gz'); t.add('/data',arcname='.'); t.close(); os.chmod('/backup/{filename}',0o600)"
+                # Linux bind mounts preserve root ownership from the helper;
+                # hand the private archive back to the invoking host user.
+                script = f"import tarfile,os; t=tarfile.open('/backup/{filename}','w:gz'); t.add('/data',arcname='.'); t.close(); os.chown('/backup/{filename}',{os.getuid()},{os.getgid()}); os.chmod('/backup/{filename}',0o600)"
                 helper(value["name"], folder, script)
                 with open(folder / filename, "rb") as archive:
                     manifest["volumes"][key] = {"file": filename, "sha256": hashlib.file_digest(archive, "sha256").hexdigest()}
