@@ -1,0 +1,27 @@
+{
+  "name": "monitoring-example-nestjs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node --require ./dist/instrumentation.js dist/main.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-express": "12.1.2",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/auto-instrumentations-node": "0.80.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.222.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "pino": "10.4.0",
+    "@prometheus-io/client": "0.16.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  },
+  "engines": {"node": ">=24"}
+}

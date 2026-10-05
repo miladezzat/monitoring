@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:8081"],
+    "labels": {"service_name": "my-service", "environment": "local"}
+  }
+]

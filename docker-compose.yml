@@ -1,42 +1,166 @@
-version: '3.7'
+name: monitoring
+
+x-runtime: &runtime
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
 
 services:
-  prometheus:
-    image: prom/prometheus
+  readiness:
+    <<: *runtime
+    image: python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
+    user: "10001:10001"
+    read_only: true
+    command: [python, -c, "import time; time.sleep(31536000)"]
+    volumes: ["./scripts/healthcheck.py:/healthcheck.py:ro"]
+    mem_limit: 32m
+    healthcheck:
+      test: [CMD, python, /healthcheck.py]
+      interval: 10s
+      timeout: 15s
+      start_period: 45s
+      retries: 12
+
+  volume-init:
+    image: python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
+    command: [python, /init-volumes.py]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 32m
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
+      - ./scripts/init-volumes.py:/init-volumes.py:ro
+      - alloy-data:/state/alloy
+      - tempo-data:/state/tempo
+      - app-logs:/state/logs
+
+  prometheus:
+    <<: *runtime
+    image: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    extra_hosts: [host.docker.internal:host-gateway]
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"]
+    mem_limit: 512m
 
   grafana:
-    image: grafana/grafana
-    ports:
-      - "3001:3000"
+    <<: *runtime
+    image: grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Run python3 scripts/setup.py first}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
     volumes:
       - grafana-storage:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3001}:3000"]
+    mem_limit: 384m
 
   loki:
-    image: grafana/loki
-    ports:
-      - "3100:3100"
+    <<: *runtime
+    image: grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    command: [-config.file=/etc/loki/config.yaml]
     volumes:
-      - ./loki/config.yaml:/etc/loki/config.yaml
-
-  promtail:
-    image: grafana/promtail
-    volumes:
-      - ./promtail/promtail-config.yaml:/etc/promtail/config.yaml
-      - /var/log/nestjs:/var/log/nestjs
-    command: -config.file=/etc/promtail/config.yaml
+      - ./loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports: ["127.0.0.1:${LOKI_PORT:-3100}:3100"]
+    mem_limit: 512m
 
   tempo:
-    image: grafana/tempo
-    ports:
-      - "3200:3200"
+    <<: *runtime
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+    image: grafana/tempo:3.1.0@sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd
+    command: [-target=all, -config.file=/etc/tempo-config.yaml]
     volumes:
-      - ./tempo/tempo-config.yaml:/etc/tempo-config.yaml
-    command: ["--config.file=/etc/tempo-config.yaml"]
+      - ./tempo/tempo-config.yaml:/etc/tempo-config.yaml:ro
+      - tempo-data:/var/tempo
+    ports: ["127.0.0.1:${TEMPO_PORT:-3200}:3200"]
+    mem_limit: 512m
+
+  alloy:
+    <<: *runtime
+    user: "10001:10001"
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+    image: grafana/alloy:v1.20.1@sha256:2aa2099af76c0098d4af7a4d6e48f86cb66dc1a000222ad927a1c67c6542d13f
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --stability.level=public-preview
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy
+      - app-logs:/var/log/apps:ro
+    ports:
+      - "127.0.0.1:${ALLOY_PORT:-12345}:12345"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
+    mem_limit: 384m
+
+  alertmanager:
+    <<: *runtime
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    command: [--config.file=/etc/alertmanager/config.yml, --storage.path=/alertmanager, --cluster.listen-address=]
+    volumes:
+      - ./alertmanager/config.yml:/etc/alertmanager/config.yml:ro
+      - alertmanager-data:/alertmanager
+    ports: ["127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"]
+    mem_limit: 128m
+
+  example-nestjs:
+    <<: *runtime
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+    profiles: [demo]
+    build: ./examples/nestjs
+    environment:
+      OTEL_SERVICE_NAME: example-nestjs
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=local
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://alloy:4318/v1/traces
+      LOG_FILE: /var/log/apps/nestjs.log
+    volumes: [app-logs:/var/log/apps]
+    ports: ["127.0.0.1:${NESTJS_PORT:-3000}:3000"]
+    mem_limit: 256m
+
+  example-python:
+    <<: *runtime
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+    profiles: [demo]
+    build: ./examples/python
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      LOG_FILE: /var/log/apps/python.log
+    volumes: [app-logs:/var/log/apps]
+    ports: ["127.0.0.1:${PYTHON_PORT:-3002}:8000"]
+    mem_limit: 128m
 
 volumes:
   grafana-storage:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  alloy-data:
+  alertmanager-data:
+  app-logs:

@@ -1,0 +1,39 @@
+name: Verify monitoring starter
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: monitoring-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: monitoring-ci
+      GRAFANA_ADMIN_PASSWORD: ci-local-fixture-password
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Validate configuration and alert rules
+        run: python3 scripts/check.py
+      - name: Build examples and start stack
+        run: docker compose --profile demo up -d --build --wait --wait-timeout 180
+      - name: Verify ingestion, outages, alerting and persistent state
+        run: python3 scripts/verify.py --recovery
+      - name: Verify quiesced backup and restore
+        run: python3 scripts/verify_backup.py
+      - name: Capture diagnostics on failure
+        if: failure()
+        run: |
+          docker compose --profile demo ps
+          docker compose --profile demo logs --tail 100
+      - name: Clean up isolated test stack
+        if: always()
+        run: docker compose --profile demo down --volumes --remove-orphans

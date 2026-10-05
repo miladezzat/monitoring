@@ -1,0 +1,71 @@
+rule_files: [/etc/prometheus/rules/monitoring.yml]
+evaluation_interval: 15s
+tests:
+  - interval: 15s
+    input_series:
+      - series: 'up{job="loki",instance="loki:3100"}'
+        values: '0 0 0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 15s
+        alertname: BackendDown
+        exp_alerts: []
+      - eval_time: 45s
+        alertname: BackendDown
+        exp_alerts:
+          - exp_labels: {job: loki, instance: "loki:3100", severity: critical}
+            exp_annotations:
+              summary: 'loki is unavailable'
+              description: 'Prometheus cannot scrape loki:3100. Check service readiness and logs.'
+      - eval_time: 90s
+        alertname: BackendDown
+        exp_alerts: []
+  - interval: 15s
+    input_series:
+      - series: 'http_requests_total{service_name="busy",status_code="500"}'
+        values: '0+15x32'
+      - series: 'http_requests_total{service_name="busy",status_code="200"}'
+        values: '0+135x32'
+      - series: 'http_requests_total{service_name="quiet",status_code="500"}'
+        values: '0+1x32'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: {service_name: busy, severity: warning}
+            exp_annotations: {summary: 'High error rate for busy'}
+  - interval: 15s
+    input_series:
+      - series: 'up{job="application",instance="app:8080"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ApplicationDown
+        exp_alerts:
+          - exp_labels: {job: application, instance: "app:8080", severity: critical}
+            exp_annotations: {summary: 'Application app:8080 is unavailable'}
+  - interval: 15s
+    input_series:
+      - series: 'otelcol_exporter_queue_size{component_id="otelcol.exporter.otlphttp.tempo",data_type="traces"}'
+        values: '230x12'
+      - series: 'otelcol_exporter_queue_capacity{component_id="otelcol.exporter.otlphttp.tempo",data_type="traces"}'
+        values: '256x12'
+      - series: 'otelcol_exporter_queue_size{component_id="otelcol.exporter.otlphttp.loki",data_type="logs"}'
+        values: '20x12'
+      - series: 'otelcol_exporter_queue_capacity{component_id="otelcol.exporter.otlphttp.loki",data_type="logs"}'
+        values: '256x12'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TelemetryQueueBacklog
+        exp_alerts:
+          - exp_labels: {component_id: otelcol.exporter.otlphttp.tempo, data_type: traces, severity: warning}
+            exp_annotations: {summary: 'Alloy traces exporter queue is nearly full'}
+  - interval: 15s
+    input_series:
+      - series: 'loki_write_dropped_entries_total{reason="queue_is_full"}'
+        values: '0+15x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: FileLogsDropped
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: 'Alloy is dropping file log entries'}
