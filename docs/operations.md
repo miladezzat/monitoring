@@ -49,7 +49,7 @@ Do not turn up label cardinality or retry buffers to hide a failing backend. Fix
 
 ## Backup and restore
 
-Named volumes preserve data across container recreation; they do not protect against deleting volumes or losing the host. The backup helper stops all project containers before archiving all seven data volumes and restarts previously running services afterward. Expect an interruption. It uses the pinned Python image without network access, preserves numeric ownership, creates a new directory with mode `0700`, writes archives with mode `0600`, and records SHA-256 checksums. Backup contents include credentials and sensitive telemetry; keep the directory outside Git and protect copies accordingly.
+Named volumes preserve data across container recreation; they do not protect against deleting volumes or losing the host. The backup helper stops all project containers before archiving all seven data volumes and restarts previously running services afterward. Expect an interruption. It uses the pinned Python image without network access, preserves numeric ownership inside the archives, creates a new directory with mode `0700`, assigns archives to the invoking host user with mode `0600`, and records SHA-256 checksums. Backup contents include credentials and sensitive telemetry; keep the directory outside Git and protect copies accordingly.
 
 ```bash
 # The destination must not exist yet. Use a location outside this checkout:
